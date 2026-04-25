@@ -386,4 +386,95 @@ public final class BotanyPotsGameTests {
             BotanyPotBlockEntity.tickPot(level, pos, state, pot);
         }
     }
+
+    /**
+     * Microbenchmark for A1. Drives a growing pot through tickPot and toggles
+     * the getRequiredGrowthTicks cache.
+     *
+     * Threshold is intentionally lenient (5%): A1's saved work is the body of
+     * one Helpers method while tickPot also runs S1 lookups, cooldowns, growth
+     * accounting and (no-op) hopper logic. The gain matters in aggregate over
+     * thousands of pots on a real server but only shows as a few percent of a
+     * single tickPot call. A failing run here means A1 is broken or
+     * net-negative, not "less than the doc's 70/85% on the full hot path".
+     */
+    @GameTest(template = "empty_platform", timeoutTicks = 200)
+    public static void a1MicrobenchProvesGain(GameTestHelper helper) {
+        final Block pot = BuiltInRegistries.BLOCK.get(BOTANY_POT_ID);
+        helper.setBlock(POT_POS, pot.defaultBlockState());
+
+        if (!(helper.getBlockEntity(POT_POS) instanceof BotanyPotBlockEntity bpe)) {
+            helper.fail("Block at " + POT_POS + " is not a BotanyPotBlockEntity.");
+            return;
+        }
+
+        bpe.setItem(SOIL_SLOT, new ItemStack(Items.DIRT));
+        bpe.setItem(SEED_SLOT, new ItemStack(Items.WHEAT_SEEDS));
+        if (bpe.getOrInvalidateSoil() == null || bpe.getOrInvalidateCrop() == null) {
+            helper.fail("Default soil/crop recipes did not resolve - benchmark needs them.");
+            return;
+        }
+
+        final ServerLevel level = helper.getLevel();
+        final BlockPos absPos = helper.absolutePos(POT_POS);
+        final BlockState state = bpe.getBlockState();
+
+        final int warmupIters = 2_000;
+        final int measureIters = 60_000;
+
+        warmA1(level, absPos, state, bpe, false, warmupIters);
+        warmA1(level, absPos, state, bpe, true, warmupIters);
+        warmA1(level, absPos, state, bpe, false, warmupIters);
+        warmA1(level, absPos, state, bpe, true, warmupIters);
+
+        ArcadiaConfig.BOTANY.a1RequiredGrowthTicksCache.set(false);
+        final long offStart = System.nanoTime();
+        for (int i = 0; i < measureIters; i++) {
+            BotanyPotBlockEntity.tickPot(level, absPos, state, bpe);
+        }
+        final long offNanos = System.nanoTime() - offStart;
+
+        ArcadiaConfig.BOTANY.a1RequiredGrowthTicksCache.set(true);
+        final long onStart = System.nanoTime();
+        for (int i = 0; i < measureIters; i++) {
+            BotanyPotBlockEntity.tickPot(level, absPos, state, bpe);
+        }
+        final long onNanos = System.nanoTime() - onStart;
+
+        ArcadiaConfig.BOTANY.a1RequiredGrowthTicksCache.set(true);
+
+        final double offMs   = offNanos / 1_000_000.0;
+        final double onMs    = onNanos  / 1_000_000.0;
+        final double speedup = (double) offNanos / onNanos;
+        final double gainPct = (1.0 - (double) onNanos / offNanos) * 100.0;
+        final double offNs   = offNanos / (double) measureIters;
+        final double onNs    = onNanos  / (double) measureIters;
+
+        ArcadiaTweaks.LOGGER.info(
+                "[A1 microbench] iters={} | off={}ms ({} ns/tick) | on={}ms ({} ns/tick) | speedup={}x | gain={}%",
+                measureIters,
+                String.format(java.util.Locale.ROOT, "%.2f", offMs),
+                String.format(java.util.Locale.ROOT, "%.1f", offNs),
+                String.format(java.util.Locale.ROOT, "%.2f", onMs),
+                String.format(java.util.Locale.ROOT, "%.1f", onNs),
+                String.format(java.util.Locale.ROOT, "%.2f", speedup),
+                String.format(java.util.Locale.ROOT, "%.1f", gainPct));
+
+        final double minGainPct = 5.0;
+        if (gainPct < minGainPct) {
+            helper.fail("A1 microbench: only " + String.format(java.util.Locale.ROOT, "%.1f", gainPct)
+                    + "% gain (threshold " + minGainPct + "%). off="
+                    + String.format(java.util.Locale.ROOT, "%.2f", offMs) + "ms, on="
+                    + String.format(java.util.Locale.ROOT, "%.2f", onMs) + "ms over " + measureIters + " ticks.");
+            return;
+        }
+        helper.succeed();
+    }
+
+    private static void warmA1(ServerLevel level, BlockPos pos, BlockState state, BotanyPotBlockEntity pot, boolean a1On, int n) {
+        ArcadiaConfig.BOTANY.a1RequiredGrowthTicksCache.set(a1On);
+        for (int i = 0; i < n; i++) {
+            BotanyPotBlockEntity.tickPot(level, pos, state, pot);
+        }
+    }
 }
