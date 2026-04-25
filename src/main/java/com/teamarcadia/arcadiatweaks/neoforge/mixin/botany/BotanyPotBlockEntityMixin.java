@@ -6,6 +6,7 @@ import com.teamarcadia.arcadiatweaks.common.config.ArcadiaConfig;
 import net.darkhax.bookshelf.common.api.function.ReloadableCache;
 import net.darkhax.botanypots.common.api.data.recipes.crop.Crop;
 import net.darkhax.botanypots.common.api.data.recipes.soil.Soil;
+import net.darkhax.botanypots.common.impl.block.entity.AbstractBotanyPotBlockEntity;
 import net.darkhax.botanypots.common.impl.block.entity.BotanyPotBlockEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.RecipeHolder;
@@ -38,8 +39,9 @@ public abstract class BotanyPotBlockEntityMixin {
     @Shadow @Final private ReloadableCache<RecipeHolder<Soil>> soil;
     @Shadow @Final private ReloadableCache<RecipeHolder<Crop>> crop;
 
-    @Shadow public abstract ItemStack getSoilItem();
-    @Shadow public abstract ItemStack getSeedItem();
+    // getSoilItem/getSeedItem live on the abstract superclass; @Shadow can only
+    // bind to methods declared on the target class itself, so we cast through
+    // AbstractBotanyPotBlockEntity at the call site instead.
 
     @Unique private RecipeHolder<Soil> arcadia$lastSoilHolder;
     @Unique private RecipeHolder<Crop> arcadia$lastCropHolder;
@@ -72,7 +74,7 @@ public abstract class BotanyPotBlockEntityMixin {
         if (arcadia$soilTtl > 0
                 && arcadia$lastSoilHolder != null
                 && self.getBlockState() == arcadia$lastSoilState
-                && !this.getSoilItem().isEmpty()) {
+                && !((AbstractBotanyPotBlockEntity) self).getSoilItem().isEmpty()) {
             final RecipeHolder<Soil> current = this.soil.apply(lvl);
             if (current == arcadia$lastSoilHolder) {
                 arcadia$soilTtl--;
@@ -108,7 +110,7 @@ public abstract class BotanyPotBlockEntityMixin {
         if (arcadia$cropTtl > 0
                 && arcadia$lastCropHolder != null
                 && self.getBlockState() == arcadia$lastCropState
-                && !this.getSeedItem().isEmpty()) {
+                && !((AbstractBotanyPotBlockEntity) self).getSeedItem().isEmpty()) {
             final RecipeHolder<Crop> current = this.crop.apply(lvl);
             if (current == arcadia$lastCropHolder) {
                 arcadia$cropTtl--;
