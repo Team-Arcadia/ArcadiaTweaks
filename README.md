@@ -103,14 +103,19 @@ Current suite (all green):
 | `s1CropGrowthAdvances`            | Pot + dirt + wheat seeds → after 150 ticks `growthTime > 0` (S1 does not break growth)                           |
 | `s1CacheInvalidatesOnSeedSwap`    | Swapping seed item invalidates the cached crop recipe (S1 invalidation triggers on slot change)                  |
 | `s1MicrobenchProvesGain`          | Tight-loop ratio of `getOrInvalidate` with S1 off vs on - **fails if the gain is below 30%**, logs ns/op + speedup |
+| `s3HopperBackoffNoCrash`          | Hopper pot above empty space - no crash, items preserved (export is a no-op when nothing is below)               |
+| `s3MicrobenchProvesGain`          | Drives `tickPot` directly with a hopper pot above a *full* chest, S3 off vs on - **fails if the gain is below 30%** |
 
-Last recorded microbench (200 000 iterations, Ryzen 9 7900X, JDK 21.0.10):
+Last recorded benches (Ryzen 9 7900X, JDK 21.0.10):
 
 ```
-off = 259.1 ns/op    on = 146.7 ns/op    speedup = 1.77x    gain = 43.4%
+S1 (matches() memoization)  iters=200 000   off=276.1 ns/op    on=165.5 ns/op    speedup=1.67x    gain=40.1%
+S3 (hopper export backoff)  iters= 30 000   off=2810  ns/tick  on=210.6 ns/tick  speedup=13.35x   gain=92.5%
 ```
 
-This is a tight-loop measurement of the exact code S1 caches (`matches()` invocation through `getOrInvalidate`), **not** full `tickPot` cost. It is the upper bound of S1's contribution on the production hot path - a real Spark profile on a dense farm will show a lower percentage because `tickPot` includes work outside S1's scope (cooldowns, hopper export, `getRequiredGrowthTicks`, `crop.onTick`).
+Both numbers are tight-loop measurements of the code each strategy caches (`matches()` for S1, the whole hopper export branch of `tickPot` for S3). They are **upper bounds** of each strategy's contribution on the production hot path - a real Spark profile on a dense farm will show a smaller percentage because `tickPot` also runs work outside the cached scope (cooldowns, growth ticks, harvest path, `getRequiredGrowthTicks`).
+
+Why the S3 number is so high: it benchmarks the worst case (a hopper pot above a chest that always rejects). With S3 off, every game tick goes through `getBlockState(below) → for slot in STORAGE_SLOTS → inventoryInsert → setItem`. With S3 on, only one tick in `s3_hopper_backoff_min_ticks` (default 16) does that work - the rest short-circuit at the `getBlockState` wrap. On a server that runs *several hundred* hopper pots in this state simultaneously (typical of a saturated farm waiting for downstream drainage), this is dominant.
 
 Tests live in `src/main/java/com/teamarcadia/arcadiatweaks/neoforge/gametest/BotanyPotsGameTests.java`.
 
