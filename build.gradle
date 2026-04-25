@@ -1,0 +1,111 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev' version '2.0.78'
+}
+
+group = mod_group
+version = mod_version
+base.archivesName = mod_id
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(21)
+    withSourcesJar()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release.set(21)
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://maven.neoforged.net/releases' }
+    flatDir {
+        name = 'arcadia-libs'
+        dirs 'libs'
+    }
+}
+
+dependencies {
+    // Local jars in libs/ - copied from the production Arcadia modpack instance.
+    // BotanyPots is declared as an OPTIONAL dep in mods.toml (umbrella stance);
+    // botany.mixins.json (required: false) silently skips its targets if absent.
+    //
+    // Same jars are used for compile AND runtime so the Mixins target the exact
+    // bytecode that ships in production. They are NOT bundled in the released
+    // mod jar (moddev publishes a thin jar; these go through compileOnly/runtimeOnly).
+    compileOnly  files("libs/botanypots-neoforge-1.21.1-${botanypots_version}.jar")
+    compileOnly  files("libs/bookshelf-neoforge-1.21.1-${bookshelf_version}.jar")
+
+    runtimeOnly  files("libs/botanypots-neoforge-1.21.1-${botanypots_version}.jar")
+    runtimeOnly  files("libs/bookshelf-neoforge-1.21.1-${bookshelf_version}.jar")
+    runtimeOnly  files("libs/prickle-neoforge-1.21.1-${prickle_version}.jar")
+}
+
+neoForge {
+    version = neoforge_version
+
+    parchment {
+        minecraftVersion = parchment_minecraft_version
+        mappingsVersion = parchment_version
+    }
+
+    runs {
+        configureEach {
+            systemProperty 'forge.logging.markers', 'REGISTRIES'
+            systemProperty 'forge.logging.console.level', 'debug'
+            systemProperty 'mixin.debug', 'true'
+            systemProperty 'mixin.debug.export', 'true'
+        }
+        client {
+            client()
+        }
+        server {
+            server()
+        }
+        data {
+            data()
+            programArguments.addAll '--mod', mod_id, '--all',
+                    '--output', file('src/generated/resources/').absolutePath,
+                    '--existing', file('src/main/resources/').absolutePath
+        }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+processResources {
+    def expandProps = [
+        'mod_id'                  : mod_id,
+        'mod_name'                : mod_name,
+        'mod_version'             : mod_version,
+        'mod_license'             : mod_license,
+        'mod_authors'             : mod_authors,
+        'mod_description'         : mod_description,
+        'mod_credits'             : mod_credits,
+        'minecraft_version'       : minecraft_version,
+        'neoforge_version'        : neoforge_version,
+    ]
+    inputs.properties expandProps
+    filesMatching(['META-INF/neoforge.mods.toml', 'pack.mcmeta']) {
+        expand expandProps
+    }
+}
+
+jar {
+    manifest {
+        attributes([
+            'Specification-Title'     : mod_name,
+            'Specification-Vendor'    : mod_authors,
+            'Specification-Version'   : '1',
+            'Implementation-Title'    : mod_name,
+            'Implementation-Version'  : mod_version,
+            'Implementation-Vendor'   : mod_authors,
+            'MixinConfigs'            : "${mod_id}.mixins.json,${mod_id}.botany.mixins.json"
+        ])
+    }
+}

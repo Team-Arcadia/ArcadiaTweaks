@@ -1,0 +1,15 @@
+{
+  "required": false,
+  "minVersion": "0.8.5",
+  "package": "com.teamarcadia.arcadiatweaks.neoforge.mixin.botany",
+  "compatibilityLevel": "JAVA_21",
+  "refmap": "arcadiatweaks.refmap.json",
+  "mixins": [],
+  "server": [
+    "BotanyPotBlockEntityMixin"
+  ],
+  "client": [],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
