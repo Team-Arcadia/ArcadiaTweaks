@@ -110,6 +110,8 @@ Current suite (all green):
 | `fullHarvestCycleProducesDrops`   | Hopper pot + dirt + wheat seeds, no inventory below; tickPot for up to 8000 ticks; succeeds when the storage slot fills (full harvest cycle) |
 | `s3BackoffRecoversWhenDownstreamEmpties` | Hopper pot above a full chest goes into deep backoff, the chest is then emptied; asserts the export resumes within 2× max-backoff ticks |
 | `multiPotMixedFarmBench`          | 4 pots in a mixed farm (basic + hopper, with/without inventory below), all three optims off vs on - asserts no cross-BE state corruption and **fails if gain is below 30%** |
+| `s2GrowthSpeedPreservedAtN4`      | 800 ticks at coalesce_n=1 vs n=4, asserts `growthTime` differs by at most N (the amplification compensates the skipped ticks exactly - delta typically 0.00) |
+| `s2MicrobenchProvesGainAtN4`      | tickPot ns/op at coalesce_n=1 vs n=4 - **fails if the gain is below 50%** (expected ~75-80% since 3 of 4 calls just hit the cancel-at-head path) |
 
 Last recorded benches (Ryzen 9 7900X, JDK 21.0.10):
 
@@ -118,8 +120,11 @@ S1 (matches() memoization)        iters=200 000   off=253.7 ns/op    on=161.5 ns
 S3 (hopper export backoff)        iters= 30 000   off=1872 ns/tick   on=378.3 ns/tick  speedup=4.95x    gain=79.8%
 A1 (getRequiredGrowthTicks cache) iters= 60 000   off=207.5 ns/tick  on=170.0 ns/tick  speedup=1.22x    gain=18.1%
 Multi-pot mixed farm (4 pots)     calls=40 000    off=1349.8 ns/tick on=666.6 ns/tick  speedup=2.02x    gain=50.6%
+S2 (tick coalescing N=4)          iters= 80 000   n1=362.5  ns/tick  n4=71.9  ns/tick  speedup=5.04x    gain=80.2%
 S1+S3+A1 combined vs all-off      iters= 30 000   off=6320 ns/tick   on=519.0 ns/tick  speedup=12.18x   gain=91.8%
 ```
+
+S2 also passes its **correctness** test: at N=4 the resulting `growthTime` after 800 ticks matched the N=1 baseline exactly (`delta=0.00`). The amplification multiplies each `TickAccumulator` delta by N on the one tick where the body runs, so growth speed and cooldowns are unchanged from the player's perspective.
 
 **Combined upper bound: -93% per `tickPot` call** on a saturated hopper pot. At scale (hundreds of pots), real-world MSPT savings on the server thread track this percentage when the pot population is dominated by hopper-saturated cases, and settle closer to the S1+A1 figure (~30-50%) when pots are mostly fed by a working downstream.
 
