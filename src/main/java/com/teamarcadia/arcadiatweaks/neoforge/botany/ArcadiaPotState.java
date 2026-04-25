@@ -30,4 +30,16 @@ public interface ArcadiaPotState {
     int arcadia$getTickInsertSuccesses();
     void arcadia$setTickInsertSuccesses(int value);
     void arcadia$incrementTickInsertSuccesses();
+
+    // A1 - getRequiredGrowthTicks cache.
+    // requiredTicksRemaining encodes both validity and the safety-net TTL: a
+    // positive value means the cached integer is still good for that many
+    // calls; zero means the cache is invalid and the next call must
+    // re-compute.
+    int arcadia$getCachedRequiredTicks();
+    void arcadia$setCachedRequiredTicks(int value);
+
+    int arcadia$getRequiredTicksRemaining();
+    void arcadia$setRequiredTicksRemaining(int value);
+    void arcadia$decrementRequiredTicksRemaining();
 }
