@@ -855,4 +855,156 @@ public final class BotanyPotsGameTests {
             BotanyPotBlockEntity.tickPot(level, absD, sd, pd);
         }
     }
+
+    /**
+     * S2 correctness check: with coalesce_n=4 and S2 on, the effective
+     * growthTime after K game ticks must be approximately equal to the
+     * baseline (S2 off) on the same K ticks. The amplification multiplies
+     * each tickUp delta by N exactly when the body runs, so the net
+     * accumulated growth should match.
+     *
+     * Tolerance: +/- N ticks. We don't expect exact equality because the
+     * baseline runs the body every tick (linear increment) while S2
+     * accumulates in chunks of N at phase 0; over K ticks the totals
+     * differ by at most N depending on where the K-tick window falls
+     * inside the cycle.
+     */
+    @GameTest(template = "empty_platform", timeoutTicks = 200)
+    public static void s2GrowthSpeedPreservedAtN4(GameTestHelper helper) {
+        final int growthBudget = 800;
+        final int n = 4;
+
+        final float baselineGrowth = arcadia$measureGrowth(helper, growthBudget, false, n);
+        final float coalescedGrowth = arcadia$measureGrowth(helper, growthBudget, true, n);
+
+        ArcadiaTweaks.LOGGER.info(
+                "[S2 correctness] N={} ticks={} | baseline growthTime={} | coalesced growthTime={} | delta={}",
+                n, growthBudget,
+                String.format(java.util.Locale.ROOT, "%.2f", baselineGrowth),
+                String.format(java.util.Locale.ROOT, "%.2f", coalescedGrowth),
+                String.format(java.util.Locale.ROOT, "%.2f", coalescedGrowth - baselineGrowth));
+
+        final float tolerance = (float) n;
+        if (Math.abs(coalescedGrowth - baselineGrowth) > tolerance) {
+            helper.fail("S2 growthTime drifted by " + (coalescedGrowth - baselineGrowth)
+                    + " over " + growthBudget + " ticks (tolerance +/- " + tolerance + "). "
+                    + "baseline=" + baselineGrowth + " coalesced=" + coalescedGrowth);
+            return;
+        }
+        helper.succeed();
+    }
+
+    private static float arcadia$measureGrowth(GameTestHelper helper, int gameTicks, boolean coalesce, int n) {
+        final Block basicPot = BuiltInRegistries.BLOCK.get(BOTANY_POT_ID);
+        helper.setBlock(POT_POS, basicPot.defaultBlockState());
+        if (!(helper.getBlockEntity(POT_POS) instanceof BotanyPotBlockEntity bpe)) {
+            return Float.NaN;
+        }
+        bpe.setItem(SOIL_SLOT, new ItemStack(Items.DIRT));
+        bpe.setItem(SEED_SLOT, new ItemStack(Items.WHEAT_SEEDS));
+
+        final ServerLevel level = helper.getLevel();
+        final BlockPos absPos = helper.absolutePos(POT_POS);
+        final BlockState state = bpe.getBlockState();
+
+        ArcadiaConfig.BOTANY.s2TickCoalescing.set(coalesce);
+        ArcadiaConfig.BOTANY.s2CoalesceN.set(coalesce ? n : 1);
+        try {
+            for (int i = 0; i < gameTicks; i++) {
+                BotanyPotBlockEntity.tickPot(level, absPos, state, bpe);
+            }
+            return bpe.growthTime.getTicks();
+        } finally {
+            ArcadiaConfig.BOTANY.s2TickCoalescing.set(true);
+            ArcadiaConfig.BOTANY.s2CoalesceN.set(1);
+            bpe.reset();
+        }
+    }
+
+    /**
+     * S2 microbench: drive a basic pot N=4 vs N=1, expect ~75% gain in
+     * average ns/tickPot since 3 of 4 calls just hit the cancel-at-head
+     * path. Threshold is 50% to leave headroom for JIT noise.
+     */
+    @GameTest(template = "empty_platform", timeoutTicks = 200)
+    public static void s2MicrobenchProvesGainAtN4(GameTestHelper helper) {
+        final Block basicPot = BuiltInRegistries.BLOCK.get(BOTANY_POT_ID);
+        helper.setBlock(POT_POS, basicPot.defaultBlockState());
+
+        if (!(helper.getBlockEntity(POT_POS) instanceof BotanyPotBlockEntity bpe)) {
+            helper.fail("Block at " + POT_POS + " is not a BotanyPotBlockEntity.");
+            return;
+        }
+
+        bpe.setItem(SOIL_SLOT, new ItemStack(Items.DIRT));
+        bpe.setItem(SEED_SLOT, new ItemStack(Items.WHEAT_SEEDS));
+        if (bpe.getOrInvalidateSoil() == null || bpe.getOrInvalidateCrop() == null) {
+            helper.fail("Default soil/crop recipes did not resolve.");
+            return;
+        }
+
+        final ServerLevel level = helper.getLevel();
+        final BlockPos absPos = helper.absolutePos(POT_POS);
+        final BlockState state = bpe.getBlockState();
+
+        final int warmupIters = 2_000;
+        final int measureIters = 80_000;
+
+        warmS2(level, absPos, state, bpe, false, warmupIters);
+        warmS2(level, absPos, state, bpe, true, warmupIters);
+        warmS2(level, absPos, state, bpe, false, warmupIters);
+        warmS2(level, absPos, state, bpe, true, warmupIters);
+
+        ArcadiaConfig.BOTANY.s2TickCoalescing.set(true);
+        ArcadiaConfig.BOTANY.s2CoalesceN.set(1);
+        final long offStart = System.nanoTime();
+        for (int i = 0; i < measureIters; i++) {
+            BotanyPotBlockEntity.tickPot(level, absPos, state, bpe);
+        }
+        final long offNanos = System.nanoTime() - offStart;
+
+        ArcadiaConfig.BOTANY.s2CoalesceN.set(4);
+        final long onStart = System.nanoTime();
+        for (int i = 0; i < measureIters; i++) {
+            BotanyPotBlockEntity.tickPot(level, absPos, state, bpe);
+        }
+        final long onNanos = System.nanoTime() - onStart;
+
+        ArcadiaConfig.BOTANY.s2CoalesceN.set(1);
+
+        final double offMs   = offNanos / 1_000_000.0;
+        final double onMs    = onNanos  / 1_000_000.0;
+        final double speedup = (double) offNanos / onNanos;
+        final double gainPct = (1.0 - (double) onNanos / offNanos) * 100.0;
+        final double offNs   = offNanos / (double) measureIters;
+        final double onNs    = onNanos  / (double) measureIters;
+
+        ArcadiaTweaks.LOGGER.info(
+                "[S2 microbench] N=1 vs N=4 | iters={} | n1={}ms ({} ns/tick) | n4={}ms ({} ns/tick) | speedup={}x | gain={}%",
+                measureIters,
+                String.format(java.util.Locale.ROOT, "%.2f", offMs),
+                String.format(java.util.Locale.ROOT, "%.1f", offNs),
+                String.format(java.util.Locale.ROOT, "%.2f", onMs),
+                String.format(java.util.Locale.ROOT, "%.1f", onNs),
+                String.format(java.util.Locale.ROOT, "%.2f", speedup),
+                String.format(java.util.Locale.ROOT, "%.1f", gainPct));
+
+        final double minGainPct = 50.0;
+        if (gainPct < minGainPct) {
+            helper.fail("S2 microbench: only " + String.format(java.util.Locale.ROOT, "%.1f", gainPct)
+                    + "% gain (threshold " + minGainPct + "%). N=1 took "
+                    + String.format(java.util.Locale.ROOT, "%.2f", offMs) + "ms, N=4 took "
+                    + String.format(java.util.Locale.ROOT, "%.2f", onMs) + "ms over " + measureIters + " ticks.");
+            return;
+        }
+        helper.succeed();
+    }
+
+    private static void warmS2(ServerLevel level, BlockPos pos, BlockState state, BotanyPotBlockEntity pot, boolean coalesce, int n) {
+        ArcadiaConfig.BOTANY.s2TickCoalescing.set(true);
+        ArcadiaConfig.BOTANY.s2CoalesceN.set(coalesce ? 4 : 1);
+        for (int i = 0; i < n; i++) {
+            BotanyPotBlockEntity.tickPot(level, pos, state, pot);
+        }
+    }
 }

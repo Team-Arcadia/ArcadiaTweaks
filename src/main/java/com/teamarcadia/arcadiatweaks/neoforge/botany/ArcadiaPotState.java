@@ -42,4 +42,12 @@ public interface ArcadiaPotState {
     int arcadia$getRequiredTicksRemaining();
     void arcadia$setRequiredTicksRemaining(int value);
     void arcadia$decrementRequiredTicksRemaining();
+
+    // S2 - tick coalescing phase counter. When the active N is > 1, only
+    // 1 game tick in N runs the full tickPot body; the others are
+    // cancelled at HEAD. The TickAccumulator.tickUp/tickDown wrapping
+    // amplifies the per-call delta to keep effective growth/cooldown
+    // speed identical to N=1.
+    int arcadia$getCoalescePhase();
+    void arcadia$setCoalescePhase(int value);
 }
