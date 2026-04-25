@@ -1007,4 +1007,62 @@ public final class BotanyPotsGameTests {
             BotanyPotBlockEntity.tickPot(level, pos, state, pot);
         }
     }
+
+    /**
+     * A2 smoke test - markUpdated() is a one-call method per slot mutation
+     * that the @WrapOperation downgrades from flag 3 to flag 2 when A2 is
+     * enabled. The actual savings (a redundant neighbor-update wave that
+     * can retrigger lighting on dense farms) cannot be observed in a
+     * single-pot gametest, so this test verifies that flipping A2 on does
+     * not break observable behavior:
+     *   - rapid slot mutations do not crash,
+     *   - cached recipes still resolve after the mutations,
+     *   - growth still advances after the mutations.
+     */
+    @GameTest(template = "empty_platform", timeoutTicks = 200)
+    public static void a2DoesNotBreakPot(GameTestHelper helper) {
+        final Block basicPot = BuiltInRegistries.BLOCK.get(BOTANY_POT_ID);
+        helper.setBlock(POT_POS, basicPot.defaultBlockState());
+
+        if (!(helper.getBlockEntity(POT_POS) instanceof BotanyPotBlockEntity bpe)) {
+            helper.fail("Block at " + POT_POS + " is not a BotanyPotBlockEntity.");
+            return;
+        }
+
+        ArcadiaConfig.BOTANY.a2LightFlagDowngrade.set(true);
+        try {
+            for (int i = 0; i < 100; i++) {
+                bpe.setItem(SOIL_SLOT, new ItemStack(Items.DIRT));
+                bpe.setItem(SEED_SLOT, new ItemStack(Items.WHEAT_SEEDS));
+                bpe.setItem(SOIL_SLOT, ItemStack.EMPTY);
+                bpe.setItem(SEED_SLOT, ItemStack.EMPTY);
+            }
+            bpe.setItem(SOIL_SLOT, new ItemStack(Items.DIRT));
+            bpe.setItem(SEED_SLOT, new ItemStack(Items.WHEAT_SEEDS));
+
+            if (bpe.getOrInvalidateSoil() == null) {
+                helper.fail("Soil did not resolve after slot churn with A2 enabled.");
+                return;
+            }
+            if (bpe.getOrInvalidateCrop() == null) {
+                helper.fail("Crop did not resolve after slot churn with A2 enabled.");
+                return;
+            }
+
+            final ServerLevel level = helper.getLevel();
+            final BlockPos absPos = helper.absolutePos(POT_POS);
+            final BlockState state = bpe.getBlockState();
+            for (int i = 0; i < 200; i++) {
+                BotanyPotBlockEntity.tickPot(level, absPos, state, bpe);
+            }
+            if (bpe.growthTime.getTicks() <= 0f) {
+                helper.fail("Growth did not advance after slot churn under A2. growthTime="
+                        + bpe.growthTime.getTicks());
+                return;
+            }
+            helper.succeed();
+        } finally {
+            ArcadiaConfig.BOTANY.a2LightFlagDowngrade.set(false);
+        }
+    }
 }
