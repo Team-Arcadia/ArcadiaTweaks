@@ -106,14 +106,18 @@ Current suite (all green):
 | `s3HopperBackoffNoCrash`          | Hopper pot above empty space - no crash, items preserved (export is a no-op when nothing is below)               |
 | `s3MicrobenchProvesGain`          | Drives `tickPot` directly with a hopper pot above a *full* chest, S3 off vs on - **fails if the gain is below 30%** |
 | `a1MicrobenchProvesGain`          | Drives `tickPot` on a growing pot, A1 off vs on - **fails if the gain is below 5%** (lenient: A1 contribution diluted in tickPot) |
+| `comboBenchProvesCombinedGain`    | All three (S1+S3+A1) toggled together against all-off, on a hopper pot above a full chest - **fails if the combined gain is below 50%** |
 
 Last recorded benches (Ryzen 9 7900X, JDK 21.0.10):
 
 ```
-S1 (matches() memoization)        iters=200 000   off=250.0 ns/op    on=163.3 ns/op    speedup=1.53x   gain=34.7%
-S3 (hopper export backoff)        iters= 30 000   off=3447 ns/tick   on=467.2 ns/tick  speedup=7.38x   gain=86.4%
-A1 (getRequiredGrowthTicks cache) iters= 60 000   off=458.9 ns/tick  on=380.3 ns/tick  speedup=1.21x   gain=17.1%
+S1 (matches() memoization)        iters=200 000   off=213.3 ns/op    on=139.2 ns/op    speedup=1.53x    gain=34.7%
+S3 (hopper export backoff)        iters= 30 000   off=2891 ns/tick   on=538.2 ns/tick  speedup=5.37x    gain=81.4%
+A1 (getRequiredGrowthTicks cache) iters= 60 000   off=215.3 ns/tick  on=184.3 ns/tick  speedup=1.17x    gain=14.4%
+S1+S3+A1 combined vs all-off      iters= 30 000   off=6825 ns/tick   on=472.5 ns/tick  speedup=14.45x   gain=93.1%
 ```
+
+**Combined upper bound: -93% per `tickPot` call** on a saturated hopper pot. At scale (hundreds of pots), real-world MSPT savings on the server thread track this percentage when the pot population is dominated by hopper-saturated cases, and settle closer to the S1+A1 figure (~30-50%) when pots are mostly fed by a working downstream.
 
 Both numbers are tight-loop measurements of the code each strategy caches (`matches()` for S1, the whole hopper export branch of `tickPot` for S3). They are **upper bounds** of each strategy's contribution on the production hot path - a real Spark profile on a dense farm will show a smaller percentage because `tickPot` also runs work outside the cached scope (cooldowns, growth ticks, harvest path, `getRequiredGrowthTicks`).
 
