@@ -86,9 +86,40 @@ Required jars (and the version each must match in `gradle.properties`):
 ./gradlew runServer
 ```
 
-### Run automated tests
+### Run automated tests (NeoForge GameTest)
 
-The `test` branch carries a NeoForge GameTest scaffolding (work in progress). On `main`, no automated tests yet.
+```bash
+./gradlew runGameTestServer
+```
+
+> ⚠️ **WIP — pivot in progress to the NeoForge 1.21 datapack-based gametest system.**
+>
+> NeoForge 1.21 has reworked the gametest framework: tests are now declared as **JSON datapack instances** (`data/<modid>/test_instance/*.json` + `data/<modid>/test_environment/*.json`) and reference a **binary** `.nbt` structure at `data/<modid>/structure/<name>.nbt` (singular folder, **not** `.snbt`). Test logic lives in functions registered via `DeferredRegister<Consumer<GameTestHelper>>` against `BuiltInRegistries.TEST_FUNCTION`. Reference: <https://docs.neoforged.net/docs/misc/gametest/>.
+>
+> The current scaffolding on this branch uses the **legacy annotation system** (`@GameTestHolder` + `@GameTest(template = ...)` + `.snbt` resource), which the 1.21 vanilla `StructureTemplateManager` no longer resolves. Symptom: `runGameTestServer` boots, mods load (BotanyPots, Bookshelf, Prickle), the `HelloWorldMixin` attaches successfully, the test holder is registered via `RegisterGameTestsEvent`, but the test crashes with `Missing test structure: arcadiatweaks:empty_platform`. The `BotanyPotBlockEntityMixin` (S1) does compile cleanly and ships in the jar - it just isn't exercised by these tests yet.
+>
+> **Next steps** (open tasks on this branch):
+> 1. Generate a binary `.nbt` template (e.g. via in-game `/structure save` or a one-shot data-generator task).
+> 2. Convert `BotanyPotsGameTests` from `@GameTest` static methods to `Consumer<GameTestHelper>` instances registered through `DeferredRegister`.
+> 3. Add `data/arcadiatweaks/test_environment/default.json` and `data/arcadiatweaks/test_instance/<name>.json` per the new schema.
+> 4. Drop the legacy `@GameTestHolder` annotation and the corresponding `RegisterGameTestsEvent` block in `ArcadiaTweaksNeoForge`.
+
+What works on this branch right now:
+
+- `./gradlew runGameTestServer` boots a headless 1.21.1 server with BotanyPots present
+- The Mixin pipeline (HelloWorldMixin + S1) attaches and the dev classpath includes the production-version jars from `libs/`
+- Crash logs land in `run/crash-reports/` for diagnostics
+
+Tests live in `src/main/java/com/teamarcadia/arcadiatweaks/neoforge/gametest/` and the (legacy) structure file in `src/main/resources/data/arcadiatweaks/structures/<name>.snbt`. After the pivot, structure files move to `data/arcadiatweaks/structure/<name>.nbt` (singular, binary).
+
+In a normal `runClient`/`runServer` you can also drive tests interactively from chat once the pivot is done:
+
+```text
+/test runall                       # run every registered test in a fresh batch
+/test runthis                      # run the test of the structure you're standing on
+/test exportall                    # snapshot every loaded test into the world save
+/test create <name> <x> <y> <z>    # create a new test arena, then build inside it
+```
 
 The dev runs are pre-configured with `mixin.debug=true` and `mixin.debug.export=true`, so the bytecode of every Mixin-applied class is dumped to `run/.mixin.out/class/` for inspection.
 
