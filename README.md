@@ -105,12 +105,14 @@ Current suite (all green):
 | `s1MicrobenchProvesGain`          | Tight-loop ratio of `getOrInvalidate` with S1 off vs on - **fails if the gain is below 30%**, logs ns/op + speedup |
 | `s3HopperBackoffNoCrash`          | Hopper pot above empty space - no crash, items preserved (export is a no-op when nothing is below)               |
 | `s3MicrobenchProvesGain`          | Drives `tickPot` directly with a hopper pot above a *full* chest, S3 off vs on - **fails if the gain is below 30%** |
+| `a1MicrobenchProvesGain`          | Drives `tickPot` on a growing pot, A1 off vs on - **fails if the gain is below 5%** (lenient: A1 contribution diluted in tickPot) |
 
 Last recorded benches (Ryzen 9 7900X, JDK 21.0.10):
 
 ```
-S1 (matches() memoization)  iters=200 000   off=276.1 ns/op    on=165.5 ns/op    speedup=1.67x    gain=40.1%
-S3 (hopper export backoff)  iters= 30 000   off=2810  ns/tick  on=210.6 ns/tick  speedup=13.35x   gain=92.5%
+S1 (matches() memoization)        iters=200 000   off=250.0 ns/op    on=163.3 ns/op    speedup=1.53x   gain=34.7%
+S3 (hopper export backoff)        iters= 30 000   off=3447 ns/tick   on=467.2 ns/tick  speedup=7.38x   gain=86.4%
+A1 (getRequiredGrowthTicks cache) iters= 60 000   off=458.9 ns/tick  on=380.3 ns/tick  speedup=1.21x   gain=17.1%
 ```
 
 Both numbers are tight-loop measurements of the code each strategy caches (`matches()` for S1, the whole hopper export branch of `tickPot` for S3). They are **upper bounds** of each strategy's contribution on the production hot path - a real Spark profile on a dense farm will show a smaller percentage because `tickPot` also runs work outside the cached scope (cooldowns, growth ticks, harvest path, `getRequiredGrowthTicks`).
