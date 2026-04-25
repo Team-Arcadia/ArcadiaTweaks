@@ -7,6 +7,7 @@ import com.teamarcadia.arcadiatweaks.common.config.ArcadiaConfig;
 import com.teamarcadia.arcadiatweaks.neoforge.botany.ArcadiaPotState;
 import net.darkhax.bookshelf.common.api.function.ReloadableCache;
 import net.darkhax.bookshelf.common.api.util.IGameplayHelper;
+import net.darkhax.bookshelf.common.api.util.TickAccumulator;
 import net.darkhax.botanypots.common.api.context.BotanyPotContext;
 import net.darkhax.botanypots.common.api.data.recipes.crop.Crop;
 import net.darkhax.botanypots.common.api.data.recipes.soil.Soil;
@@ -76,6 +77,9 @@ public abstract class BotanyPotBlockEntityMixin implements ArcadiaPotState {
     @Unique private int                arcadia$cachedRequiredTicks;
     @Unique private int                arcadia$requiredTicksRemaining;
 
+    // S2 state - phase counter for tick coalescing.
+    @Unique private int                arcadia$coalescePhase;
+
     @Override @Unique public int  arcadia$getHopperBackoff() { return arcadia$hopperBackoffRemaining; }
     @Override @Unique public void arcadia$setHopperBackoff(int value) { arcadia$hopperBackoffRemaining = value; }
 
@@ -96,6 +100,9 @@ public abstract class BotanyPotBlockEntityMixin implements ArcadiaPotState {
     @Override @Unique public int  arcadia$getRequiredTicksRemaining() { return arcadia$requiredTicksRemaining; }
     @Override @Unique public void arcadia$setRequiredTicksRemaining(int value) { arcadia$requiredTicksRemaining = value; }
     @Override @Unique public void arcadia$decrementRequiredTicksRemaining() { arcadia$requiredTicksRemaining--; }
+
+    @Override @Unique public int  arcadia$getCoalescePhase() { return arcadia$coalescePhase; }
+    @Override @Unique public void arcadia$setCoalescePhase(int value) { arcadia$coalescePhase = value; }
 
     @Inject(method = "reset", at = @At("HEAD"))
     private void arcadia$invalidateMatchCaches(CallbackInfo ci) {
@@ -119,6 +126,79 @@ public abstract class BotanyPotBlockEntityMixin implements ArcadiaPotState {
     @Inject(method = "onToolChanged", at = @At("HEAD"))
     private void arcadia$invalidateA1OnTool(ItemStack newStack, CallbackInfo ci) {
         arcadia$requiredTicksRemaining = 0;
+    }
+
+    /**
+     * S2 - tick coalescing. Skip N-1 game ticks of every N for this pot.
+     * The TickAccumulator wraps below multiply each delta by N on the one
+     * "real" tick, so growth speed and cooldowns stay identical to N=1.
+     *
+     * Player-visible side effects accepted at N>1:
+     *   - Comparator output level updates only on the "real" tick (every
+     *     N game ticks instead of every game tick).
+     *   - Harvest detection happens at the same cadence (up to N-1
+     *     extra game ticks of latency before onHarvest fires).
+     *   - bonemealCooldown progresses at 1/N (minor).
+     *
+     * Default config: enabled but with coalesce_n=1 (no-op until opt-in).
+     */
+    @Inject(method = "tickPot", at = @At("HEAD"), cancellable = true)
+    private static void arcadia$coalesceSkip(
+            Level levelArg, BlockPos posArg, BlockState stateArg, BotanyPotBlockEntity pot,
+            CallbackInfo ci) {
+        final int n = arcadia$activeCoalesceN();
+        if (n <= 1) return;
+
+        final ArcadiaPotState state = (ArcadiaPotState) pot;
+        final int next = (state.arcadia$getCoalescePhase() + 1) % n;
+        state.arcadia$setCoalescePhase(next);
+        if (next != 0) {
+            ci.cancel();
+        }
+    }
+
+    /**
+     * S2 amplification - on the one tick in N where tickPot's body runs,
+     * multiply each TickAccumulator.tickDown call by N to compensate the
+     * skipped ticks. Wraps growCooldown.tickDown and exportCooldown.tickDown.
+     */
+    @WrapOperation(method = "tickPot",
+            at = @At(value = "INVOKE",
+                     target = "Lnet/darkhax/bookshelf/common/api/util/TickAccumulator;tickDown(Lnet/minecraft/world/level/Level;)V"))
+    private static void arcadia$amplifyTickDown(
+            TickAccumulator acc, Level level, Operation<Void> original,
+            Level levelArg, BlockPos posArg, BlockState stateArg, BotanyPotBlockEntity pot) {
+        final int n = arcadia$activeCoalesceN();
+        if (n <= 1) {
+            original.call(acc, level);
+            return;
+        }
+        acc.tick(-(float) n);
+    }
+
+    /**
+     * S2 amplification - same as {@link #arcadia$amplifyTickDown} but for
+     * tickUp (used by growthTime in the growth-sustained branch).
+     */
+    @WrapOperation(method = "tickPot",
+            at = @At(value = "INVOKE",
+                     target = "Lnet/darkhax/bookshelf/common/api/util/TickAccumulator;tickUp(Lnet/minecraft/world/level/Level;)V"))
+    private static void arcadia$amplifyTickUp(
+            TickAccumulator acc, Level level, Operation<Void> original,
+            Level levelArg, BlockPos posArg, BlockState stateArg, BotanyPotBlockEntity pot) {
+        final int n = arcadia$activeCoalesceN();
+        if (n <= 1) {
+            original.call(acc, level);
+            return;
+        }
+        acc.tick((float) n);
+    }
+
+    @Unique
+    private static int arcadia$activeCoalesceN() {
+        if (!ArcadiaConfig.BOTANY.s2TickCoalescing.get()) return 1;
+        final int n = ArcadiaConfig.BOTANY.s2CoalesceN.get();
+        return Math.max(1, n);
     }
 
     /**
