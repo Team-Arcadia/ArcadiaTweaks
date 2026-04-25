@@ -14,7 +14,7 @@ public final class BotanyConfig {
     public final ModConfigSpec.BooleanValue a2LightFlagDowngrade;
     public final ModConfigSpec.IntValue    safetyRevalidatePeriod;
 
-    BotanyConfig(ModConfigSpec.Builder b) {
+    public BotanyConfig(ModConfigSpec.Builder b) {
         b.comment(
                 "BotanyPots optimizations. Each entry is a kill-switch - set false to disable",
                 "the corresponding Mixin path while keeping the rest active."

@@ -2,5 +2,8 @@
   "pack": {
     "description": "${mod_name} resources",
     "pack_format": 34
+  },
+  "data_pack": {
+    "pack_format": 48
   }
 }

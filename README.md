@@ -86,6 +86,10 @@ Required jars (and the version each must match in `gradle.properties`):
 ./gradlew runServer
 ```
 
+### Run automated tests
+
+The `test` branch carries a NeoForge GameTest scaffolding (work in progress). On `main`, no automated tests yet.
+
 The dev runs are pre-configured with `mixin.debug=true` and `mixin.debug.export=true`, so the bytecode of every Mixin-applied class is dumped to `run/.mixin.out/class/` for inspection.
 
 ## Install (production)
