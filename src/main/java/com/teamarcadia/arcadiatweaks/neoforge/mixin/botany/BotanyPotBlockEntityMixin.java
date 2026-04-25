@@ -7,6 +7,7 @@ import com.teamarcadia.arcadiatweaks.common.config.ArcadiaConfig;
 import com.teamarcadia.arcadiatweaks.neoforge.botany.ArcadiaPotState;
 import net.darkhax.bookshelf.common.api.function.ReloadableCache;
 import net.darkhax.bookshelf.common.api.util.IGameplayHelper;
+import net.darkhax.botanypots.common.api.context.BotanyPotContext;
 import net.darkhax.botanypots.common.api.data.recipes.crop.Crop;
 import net.darkhax.botanypots.common.api.data.recipes.soil.Soil;
 import net.darkhax.botanypots.common.impl.block.entity.AbstractBotanyPotBlockEntity;
@@ -71,6 +72,10 @@ public abstract class BotanyPotBlockEntityMixin implements ArcadiaPotState {
     @Unique private int                arcadia$tickInsertAttempts;
     @Unique private int                arcadia$tickInsertSuccesses;
 
+    // A1 state - cached result of Helpers.getRequiredGrowthTicks.
+    @Unique private int                arcadia$cachedRequiredTicks;
+    @Unique private int                arcadia$requiredTicksRemaining;
+
     @Override @Unique public int  arcadia$getHopperBackoff() { return arcadia$hopperBackoffRemaining; }
     @Override @Unique public void arcadia$setHopperBackoff(int value) { arcadia$hopperBackoffRemaining = value; }
 
@@ -85,6 +90,13 @@ public abstract class BotanyPotBlockEntityMixin implements ArcadiaPotState {
     @Override @Unique public void arcadia$setTickInsertSuccesses(int value) { arcadia$tickInsertSuccesses = value; }
     @Override @Unique public void arcadia$incrementTickInsertSuccesses() { arcadia$tickInsertSuccesses++; }
 
+    @Override @Unique public int  arcadia$getCachedRequiredTicks() { return arcadia$cachedRequiredTicks; }
+    @Override @Unique public void arcadia$setCachedRequiredTicks(int value) { arcadia$cachedRequiredTicks = value; }
+
+    @Override @Unique public int  arcadia$getRequiredTicksRemaining() { return arcadia$requiredTicksRemaining; }
+    @Override @Unique public void arcadia$setRequiredTicksRemaining(int value) { arcadia$requiredTicksRemaining = value; }
+    @Override @Unique public void arcadia$decrementRequiredTicksRemaining() { arcadia$requiredTicksRemaining--; }
+
     @Inject(method = "reset", at = @At("HEAD"))
     private void arcadia$invalidateMatchCaches(CallbackInfo ci) {
         arcadia$lastSoilHolder = null;
@@ -95,6 +107,18 @@ public abstract class BotanyPotBlockEntityMixin implements ArcadiaPotState {
         arcadia$cropTtl = 0;
         arcadia$hopperBackoffRemaining = 0;
         arcadia$consecutiveExportFailures = 0;
+        arcadia$requiredTicksRemaining = 0;
+    }
+
+    /**
+     * A1 - tool changes do not flow through reset() (vanilla onToolChanged
+     * only calls markUpdated()), so we hook it explicitly to drop the cached
+     * required-ticks value. Tool item / its enchantments contribute to
+     * Helpers.efficiencyModifier inside getRequiredGrowthTicks.
+     */
+    @Inject(method = "onToolChanged", at = @At("HEAD"))
+    private void arcadia$invalidateA1OnTool(ItemStack newStack, CallbackInfo ci) {
+        arcadia$requiredTicksRemaining = 0;
     }
 
     /**
@@ -183,6 +207,35 @@ public abstract class BotanyPotBlockEntityMixin implements ArcadiaPotState {
         } else {
             state.arcadia$setConsecutiveFailures(0);
         }
+    }
+
+    /**
+     * A1 - memoize Helpers.getRequiredGrowthTicks. The result depends on
+     * (cropRecipeId, soilRecipeId, harvestItem-as-tool, BlockState, config),
+     * all invariant between slot changes. Slot changes route through reset()
+     * (soil/seed) or onToolChanged (tool) - both invalidate the cache. The
+     * safety_revalidate_period_ticks ceiling bounds drift if config is
+     * reloaded mid-game without restart.
+     */
+    @WrapOperation(method = "tickPot",
+            at = @At(value = "INVOKE",
+                     target = "Lnet/darkhax/botanypots/common/impl/Helpers;getRequiredGrowthTicks(Lnet/darkhax/botanypots/common/api/context/BotanyPotContext;Lnet/minecraft/world/level/Level;Lnet/darkhax/botanypots/common/api/data/recipes/crop/Crop;Lnet/darkhax/botanypots/common/api/data/recipes/soil/Soil;)I"))
+    private static int arcadia$cachedRequiredGrowthTicks(
+            BotanyPotContext ctx, Level level, Crop crop, Soil soil, Operation<Integer> original,
+            Level levelArg, BlockPos posArg, BlockState stateArg, BotanyPotBlockEntity pot) {
+        if (!ArcadiaConfig.BOTANY.a1RequiredGrowthTicksCache.get()) {
+            return original.call(ctx, level, crop, soil);
+        }
+        final ArcadiaPotState state = (ArcadiaPotState) pot;
+        if (state.arcadia$getRequiredTicksRemaining() > 0) {
+            state.arcadia$decrementRequiredTicksRemaining();
+            return state.arcadia$getCachedRequiredTicks();
+        }
+        final int result = original.call(ctx, level, crop, soil);
+        state.arcadia$setCachedRequiredTicks(result);
+        final int period = ArcadiaConfig.BOTANY.safetyRevalidatePeriod.get();
+        state.arcadia$setRequiredTicksRemaining(period > 0 ? period : Integer.MAX_VALUE);
+        return result;
     }
 
     @WrapMethod(method = "getOrInvalidateSoil")
