@@ -477,4 +477,113 @@ public final class BotanyPotsGameTests {
             BotanyPotBlockEntity.tickPot(level, pos, state, pot);
         }
     }
+
+    /**
+     * Combined bench. Drives a worst-case-ish single-pot setup that exercises
+     * S1 + A1 (growth path active via dirt+wheat) and S3 (hopper pot above a
+     * full chest with dirt sitting in storage). Toggles ALL of s1/s3/a1 off
+     * vs ALL on, drives tickPot 30k times each, asserts >=50% combined gain.
+     *
+     * The number is the closest the gametest harness gets to "vanilla
+     * BotanyPots vs ArcadiaTweaks botany on a saturated farm pot". A real
+     * Spark profile on a 400-pot farm will land lower because this exercises
+     * the worst case (chest always rejects).
+     */
+    @GameTest(template = "empty_platform", timeoutTicks = 400)
+    public static void comboBenchProvesCombinedGain(GameTestHelper helper) {
+        final Block hopperPot = BuiltInRegistries.BLOCK.get(BOTANY_HOPPER_POT_ID);
+        final BlockPos chestRelPos = POT_POS.below();
+
+        helper.setBlock(chestRelPos, Blocks.CHEST.defaultBlockState());
+        if (!(helper.getBlockEntity(chestRelPos) instanceof ChestBlockEntity chest)) {
+            helper.fail("Chest BE missing at " + chestRelPos);
+            return;
+        }
+        for (int slot = 0; slot < chest.getContainerSize(); slot++) {
+            chest.setItem(slot, new ItemStack(Items.STONE, 64));
+        }
+
+        helper.setBlock(POT_POS, hopperPot.defaultBlockState());
+        if (!(helper.getBlockEntity(POT_POS) instanceof BotanyPotBlockEntity pot)) {
+            helper.fail("Hopper pot BE missing at " + POT_POS);
+            return;
+        }
+
+        pot.setItem(SOIL_SLOT, new ItemStack(Items.DIRT));
+        pot.setItem(SEED_SLOT, new ItemStack(Items.WHEAT_SEEDS));
+        pot.setItem(3, new ItemStack(Items.DIRT, 64));
+
+        if (pot.getOrInvalidateSoil() == null || pot.getOrInvalidateCrop() == null) {
+            helper.fail("Default soil/crop recipes did not resolve.");
+            return;
+        }
+
+        final ServerLevel level = helper.getLevel();
+        final BlockPos absPos = helper.absolutePos(POT_POS);
+        final BlockState state = pot.getBlockState();
+
+        final int warmupIters = 1_000;
+        final int measureIters = 30_000;
+
+        warmCombo(level, absPos, state, pot, false, warmupIters);
+        warmCombo(level, absPos, state, pot, true, warmupIters);
+        warmCombo(level, absPos, state, pot, false, warmupIters);
+        warmCombo(level, absPos, state, pot, true, warmupIters);
+
+        setAllOptims(false);
+        final long offStart = System.nanoTime();
+        for (int i = 0; i < measureIters; i++) {
+            BotanyPotBlockEntity.tickPot(level, absPos, state, pot);
+        }
+        final long offNanos = System.nanoTime() - offStart;
+
+        setAllOptims(true);
+        final long onStart = System.nanoTime();
+        for (int i = 0; i < measureIters; i++) {
+            BotanyPotBlockEntity.tickPot(level, absPos, state, pot);
+        }
+        final long onNanos = System.nanoTime() - onStart;
+
+        setAllOptims(true);
+
+        final double offMs   = offNanos / 1_000_000.0;
+        final double onMs    = onNanos  / 1_000_000.0;
+        final double speedup = (double) offNanos / onNanos;
+        final double gainPct = (1.0 - (double) onNanos / offNanos) * 100.0;
+        final double offNs   = offNanos / (double) measureIters;
+        final double onNs    = onNanos  / (double) measureIters;
+
+        ArcadiaTweaks.LOGGER.info(
+                "[Combined bench] S1+S3+A1 vs all-off | iters={} | off={}ms ({} ns/tick) | on={}ms ({} ns/tick) | speedup={}x | gain={}%",
+                measureIters,
+                String.format(java.util.Locale.ROOT, "%.2f", offMs),
+                String.format(java.util.Locale.ROOT, "%.1f", offNs),
+                String.format(java.util.Locale.ROOT, "%.2f", onMs),
+                String.format(java.util.Locale.ROOT, "%.1f", onNs),
+                String.format(java.util.Locale.ROOT, "%.2f", speedup),
+                String.format(java.util.Locale.ROOT, "%.1f", gainPct));
+
+        final double minGainPct = 50.0;
+        if (gainPct < minGainPct) {
+            helper.fail("Combined bench: only " + String.format(java.util.Locale.ROOT, "%.1f", gainPct)
+                    + "% gain (threshold " + minGainPct + "%). off="
+                    + String.format(java.util.Locale.ROOT, "%.2f", offMs) + "ms, on="
+                    + String.format(java.util.Locale.ROOT, "%.2f", onMs) + "ms over " + measureIters + " ticks.");
+            return;
+        }
+        helper.succeed();
+    }
+
+    private static void warmCombo(ServerLevel level, BlockPos pos, BlockState state, BotanyPotBlockEntity pot, boolean on, int n) {
+        setAllOptims(on);
+        for (int i = 0; i < n; i++) {
+            BotanyPotBlockEntity.tickPot(level, pos, state, pot);
+        }
+    }
+
+    private static void setAllOptims(boolean on) {
+        ArcadiaConfig.BOTANY.s1MatchesCache.set(on);
+        ArcadiaConfig.BOTANY.s3HopperBackoff.set(on);
+        ArcadiaConfig.BOTANY.a1RequiredGrowthTicksCache.set(on);
+    }
 }
