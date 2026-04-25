@@ -31,8 +31,10 @@ import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 @PrefixGameTestTemplate(false)
 public final class BotanyPotsGameTests {
 
+    // BotanyPots registers per-color block variants ("<color>_botany_pot");
+    // terracotta is the canonical "plain" variant (used as the creative tab icon).
     private static final ResourceLocation BOTANY_POT_ID =
-            ResourceLocation.fromNamespaceAndPath("botanypots", "botany_pot");
+            ResourceLocation.fromNamespaceAndPath("botanypots", "terracotta_botany_pot");
 
     private static final BlockPos POT_POS = new BlockPos(1, 1, 1);
 
