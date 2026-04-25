@@ -96,12 +96,21 @@ This boots a headless 1.21.1 server with BotanyPots, Bookshelf and Prickle on th
 
 Current suite (all green):
 
-| Test                              | What it asserts                                                                                     |
-|-----------------------------------|-----------------------------------------------------------------------------------------------------|
-| `smoke`                           | The structure loads and the gametest pipeline is wired                                              |
-| `s1ConsistentSoilLookup`          | Two consecutive `getOrInvalidateSoil` calls return the same `Soil` instance (S1 cache is coherent)  |
-| `s1CropGrowthAdvances`            | Pot + dirt + wheat seeds → after 150 ticks `growthTime > 0` (S1 does not break growth)              |
-| `s1CacheInvalidatesOnSeedSwap`    | Swapping seed item invalidates the cached crop recipe (S1 invalidation triggers on slot change)     |
+| Test                              | What it asserts                                                                                                  |
+|-----------------------------------|------------------------------------------------------------------------------------------------------------------|
+| `smoke`                           | The structure loads and the gametest pipeline is wired                                                           |
+| `s1ConsistentSoilLookup`          | Two consecutive `getOrInvalidateSoil` calls return the same `Soil` instance (S1 cache is coherent)               |
+| `s1CropGrowthAdvances`            | Pot + dirt + wheat seeds → after 150 ticks `growthTime > 0` (S1 does not break growth)                           |
+| `s1CacheInvalidatesOnSeedSwap`    | Swapping seed item invalidates the cached crop recipe (S1 invalidation triggers on slot change)                  |
+| `s1MicrobenchProvesGain`          | Tight-loop ratio of `getOrInvalidate` with S1 off vs on - **fails if the gain is below 30%**, logs ns/op + speedup |
+
+Last recorded microbench (200 000 iterations, Ryzen 9 7900X, JDK 21.0.10):
+
+```
+off = 259.1 ns/op    on = 146.7 ns/op    speedup = 1.77x    gain = 43.4%
+```
+
+This is a tight-loop measurement of the exact code S1 caches (`matches()` invocation through `getOrInvalidate`), **not** full `tickPot` cost. It is the upper bound of S1's contribution on the production hot path - a real Spark profile on a dense farm will show a lower percentage because `tickPot` includes work outside S1's scope (cooldowns, hopper export, `getRequiredGrowthTicks`, `crop.onTick`).
 
 Tests live in `src/main/java/com/teamarcadia/arcadiatweaks/neoforge/gametest/BotanyPotsGameTests.java`.
 
