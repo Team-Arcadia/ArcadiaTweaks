@@ -1,13 +1,13 @@
 # ArcadiaTweaks
 
-Umbrella mod-patch for the **Arcadia** modpack. Server-side, non-invasive, Mixin-based optimizations and tweaks for NeoForge **1.21.1** (build 21.1.221+).
+Umbrella mod-patch for the **Arcadia** modpack. Mostly server-side, non-invasive, Mixin-based optimizations and tweaks for NeoForge **1.21.1** (build 21.1.221+). The Mekanism module also contains one optional client-side rendering safety patch.
 
 > **First module shipped:** `botany` — server-side hot-path optimizations for [BotanyPots](https://github.com/Darkhax-Minecraft/BotanyPots) (Crop/Soil match memoization, hopper-pot export backoff, growth-tick coalescing, etc.).
 
 ## Design principles
 
 1. **Mixin only.** No reflection-based patching, no class transformers, no AccessTransformers beyond what NeoForge already provides. The mod is a stack of `@Inject` / `@Redirect` / `@WrapOperation` Mixins.
-2. **Non-invasive.** No public API surface change in the targeted mods, no recipe / datapack / registry mutation (KubeJS handles that side of the pack), no client-side rendering changes by default.
+2. **Non-invasive.** No public API surface change in the targeted mods, no recipe / datapack / registry mutation (KubeJS handles that side of the pack), and client-side rendering changes are limited to explicit Mekanism safety toggles.
 3. **Modular.** Each optimization domain lives behind a feature module (`botany`, future modules…). Each module can be disabled at runtime via the config file.
 4. **Per-strategy kill-switch.** Inside a module, **every** Mixin path has a dedicated TOML toggle. Anything can be turned off without rebuilding.
 5. **Addon-friendly.** Mixins use default priority (1000) and target stable internal classes; we never patch SPI / API surfaces consumed by addons (e.g. BotanyTrees).
@@ -31,7 +31,7 @@ ArcadiaTweaks/
 │   │       ├── ArcadiaTweaksNeoForge.java       # @Mod entry point
 │   │       └── mixin/                           # all Mixin classes live here
 │   └── resources/
-│       ├── arcadiatweaks.mixins.json            # Mixin config (server-side only)
+│       ├── arcadiatweaks.mixins.json            # Base Mixin config
 │       ├── pack.mcmeta
 │       └── META-INF/neoforge.mods.toml
 └── README.md
@@ -59,9 +59,54 @@ gradle wrapper --gradle-version 8.10
 # the jar lands in build/libs/arcadiatweaks-<version>.jar
 ```
 
+Patch-specific jars can be built from the same compiled classes. The default
+`build` jar keeps every patch enabled; the variant jars filter the Mixin configs
+and optional dependencies declared in `META-INF/neoforge.mods.toml`.
+
+```bash
+# one jar with every patch
+./gradlew jarAllPatches
+
+# one jar with only the BotanyPots patch loaded
+./gradlew jarBotanyPatch
+
+# one jar with only the Refined Storage patch loaded
+./gradlew jarRefinedStoragePatch
+
+# one jar with only the Mekanism patch loaded
+./gradlew jarMekanismPatch
+
+# property-based selection
+./gradlew jarSelectedPatch -ParcadiaPatch=botany
+./gradlew jarSelectedPatch -ParcadiaPatch=refinedstorage
+./gradlew jarSelectedPatch -ParcadiaPatch=mekanism
+./gradlew jarSelectedPatch -ParcadiaPatch=all
+
+# build all variants at once
+./gradlew jarPatchVariants
+```
+
+The in-game admin command follows the jar variant:
+
+| Jar variant | Command |
+|-------------|---------|
+| all patches | `/arcadiatweaks gui` |
+| BotanyPots only | `/botanypatch gui` |
+| Refined Storage only | `/refinedstoragepatch gui` |
+| Mekanism only | `/mekanismpatch gui` |
+
+`admin` remains available as an alias for `gui`.
+
+Patch compatibility is guarded by structure, not by version string. If a newer
+target mod still exposes the same classes, fields and method descriptors, the
+patch applies. If a target moved or changed signature, only the affected Mixin is
+skipped and ArcadiaTweaks writes one short warning instead of hard-crashing on a
+missing injection target. In the all-patches jar, a skipped BotanyPots Mixin does
+not disable Refined Storage or Mekanism Mixins, and vice versa.
+
 ### Dev runtime mods (`libs/`)
 
-ArcadiaTweaks targets BotanyPots via Mixin, so dev runs need the **exact** jars from production on the classpath. We do not consume them from a public maven; we drop the jars from the production instance directly into `libs/`.
+ArcadiaTweaks targets other mods via Mixin, so dev runs need the **exact** jars from production on the classpath. We do not consume them from a public maven; we drop the jars from the production instance directly into `libs/`.
 
 Source path on the maintainer's machine:
 
@@ -76,8 +121,10 @@ Required jars (and the version each must match in `gradle.properties`):
 | `botanypots-neoforge-1.21.1-<ver>.jar`         | `botanypots_version`   |
 | `bookshelf-neoforge-1.21.1-<ver>.jar`          | `bookshelf_version`    |
 | `prickle-neoforge-1.21.1-<ver>.jar`            | `prickle_version`      |
+| `refinedstorage-neoforge-<ver>.jar`            | `refinedstorage_version` |
+| `Mekanism-1.21.1-<ver>.jar`                    | `mekanism_version`     |
 
-`libs/*.jar` is gitignored - each developer copies their own from the production pack. When the pack updates BotanyPots/Bookshelf/Prickle, refresh `libs/` and bump the corresponding `gradle.properties` values to match the new filenames.
+`libs/*.jar` is gitignored - each developer copies their own from the production pack. When the pack updates a targeted mod, refresh `libs/` and bump the corresponding `gradle.properties` values to match the new filenames.
 
 ### Run a dev client / server
 
@@ -94,15 +141,126 @@ The dev runs are pre-configured with `mixin.debug=true` and `mixin.debug.export=
 
 ## Install (production)
 
-Drop the jar into your server `mods/` folder. ArcadiaTweaks declares **BotanyPots as `optional`** — if BotanyPots is absent the `botany` Mixins simply do not match anything and stay dormant.
+Drop the jar into your server `mods/` folder. For the Mekanism M4 rendering safety patch, also ship the same jar on clients through the Arcadia launcher. ArcadiaTweaks declares **BotanyPots as `optional`** — if BotanyPots is absent the `botany` Mixins simply do not match anything and stay dormant.
 
 The config file is generated on first run at:
 
 ```
-<server>/config/arcadiatweaks-common.toml
+<server or client>/config/arcadiatweaks-common.toml
 ```
 
-Edit it, restart the server, done.
+Edit it, restart the server or client, done. Server GUI changes affect the server config only; client rendering settings must be present on each client.
+
+## Recommended Settings
+
+These are the recommended production settings for Arcadia. They prioritize low
+regression risk while still cutting repeated tick work. Every setting is also
+available in the in-game admin GUI, except client-only rendering settings that
+must be configured on each client.
+
+### Module toggles
+
+| Setting | Recommended | Notes |
+|---------|-------------|-------|
+| `modules.botany` | `true` | Enable BotanyPots patch when BotanyPots is present. |
+| `modules.refinedstorage` | `true` | Enable Refined Storage patch when RS2 is present. |
+| `modules.mekanism` | `true` | Enable Mekanism cable/network patch when Mekanism is present. |
+
+### BotanyPots
+
+Best balanced profile:
+
+```toml
+[botany]
+matches_cache_enabled = true
+tick_coalescing_enabled = true
+tick_coalescing_n = 4
+hopper_backoff_enabled = true
+hopper_backoff_min_ticks = 16
+hopper_backoff_max_ticks = 64
+required_growth_ticks_cache_enabled = true
+light_flag_downgrade_enabled = false
+safety_revalidate_period_ticks = 200
+```
+
+| Setting | Best value | What it does |
+|---------|------------|--------------|
+| `matches_cache_enabled` | `true` | Biggest safe win; caches crop/soil recipe match checks between slot/state changes. |
+| `tick_coalescing_enabled` | `true` | Runs full pot logic once every `tick_coalescing_n` ticks, with accumulator compensation. |
+| `tick_coalescing_n` | `4` | Best balance for dense farms. Use `2` if players notice harvest/comparator latency, `1` to disable. |
+| `hopper_backoff_enabled` | `true` | Skips repeated failed exports when the inventory below is full or unavailable. |
+| `hopper_backoff_min_ticks` | `16` | Good first failure delay without making export recovery feel stale. |
+| `hopper_backoff_max_ticks` | `64` | Caps exponential backoff at ~3.2 seconds. Increase only for farms constantly pushing into full inventories. |
+| `required_growth_ticks_cache_enabled` | `true` | Caches required growth tick calculation until slot/tool changes. |
+| `light_flag_downgrade_enabled` | `false` | Keep off by default. Enable only if Spark shows neighbor/light update cost from Botany inventory updates. |
+| `safety_revalidate_period_ticks` | `200` | Revalidates cached invariants every ~10 seconds. Keep this on in production. |
+
+Aggressive Botany profile for static farms:
+
+```toml
+tick_coalescing_n = 8
+hopper_backoff_max_ticks = 200
+```
+
+Use this only when farms are mostly unattended and comparator/export latency is
+acceptable.
+
+### Refined Storage
+
+Best balanced profile:
+
+```toml
+[refinedstorage]
+activeness_check_coalescing_enabled = true
+activeness_check_interval_ticks = 20
+```
+
+| Setting | Best value | What it does |
+|---------|------------|--------------|
+| `activeness_check_coalescing_enabled` | `true` | Coalesces node/transmitter activeness state checks while keeping importer/exporter work cadence intact. |
+| `activeness_check_interval_ticks` | `20` | Best conservative value. Worst-case redstone/energy active-state visual delay is 19 ticks. |
+
+Use `10` if you want quicker redstone/energy activeness response. Use `1` to
+disable coalescing without disabling the whole module.
+
+### Mekanism
+
+Best balanced profile:
+
+```toml
+[mekanism]
+transmitter_pull_backoff_enabled = true
+transmitter_pull_backoff_max_ticks = 20
+network_emit_backoff_enabled = true
+network_emit_backoff_max_ticks = 20
+logistical_transporter_idle_backoff_enabled = true
+logistical_transporter_idle_backoff_max_ticks = 20
+client_logistical_transporter_safe_rendering_enabled = true
+client_transmitter_model_cache_max_entries = 4096
+```
+
+| Setting | Best value | What it does |
+|---------|------------|--------------|
+| `transmitter_pull_backoff_enabled` | `true` | Backs off Universal Cable, Mechanical Pipe and Pressurized Tube pull scans when they repeatedly pull nothing. |
+| `transmitter_pull_backoff_max_ticks` | `20` | Caps pull retry delay at 1 second after repeated no-op pulls. |
+| `network_emit_backoff_enabled` | `true` | Backs off energy/fluid/chemical network emit scans when the network repeatedly emits nothing. |
+| `network_emit_backoff_max_ticks` | `20` | Caps emit retry delay at 1 second. Heat networks are not touched. |
+| `logistical_transporter_idle_backoff_enabled` | `true` | Backs off repeated no-target idle path recalculations for Logistical Transporters. This targets `TransporterStack.calculateIdle` / `TransporterPathfinder.getIdlePath`. |
+| `logistical_transporter_idle_backoff_max_ticks` | `20` | Caps idle-path retry delay at 1 second. Destination and home paths are not throttled. |
+| `client_logistical_transporter_safe_rendering_enabled` | `true` | Client-side only. Keeps colored Logistical Transporters visible, but avoids Mekanism's translucent colored layer path suspected of causing progressive FPS/memory degradation. Item routing colors remain server-side. |
+| `client_transmitter_model_cache_max_entries` | `4096` | Client-side only. Clears Mekanism's transmitter baked-model cache if it grows abnormally high. Defensive leak guard; normal scenes should stay below this. |
+
+Aggressive Mekanism profile for very large idle cable networks:
+
+```toml
+transmitter_pull_backoff_max_ticks = 40
+network_emit_backoff_max_ticks = 40
+logistical_transporter_idle_backoff_max_ticks = 40
+```
+
+Use this only if Spark still shows Mekanism cable/network scans high after the
+balanced profile. It can add up to ~2 seconds before an idle, repeatedly failing
+connection retries or idle transporter path recalculations.
 
 ## Validate the Mixin pipeline
 

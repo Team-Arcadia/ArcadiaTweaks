@@ -1,0 +1,26 @@
+{
+  "required": false,
+  "minVersion": "0.8.5",
+  "plugin": "com.teamarcadia.arcadiatweaks.neoforge.mixin.mekanism.MekanismMixinPlugin",
+  "package": "com.teamarcadia.arcadiatweaks.neoforge.mixin.mekanism",
+  "compatibilityLevel": "JAVA_21",
+  "refmap": "arcadiatweaks.refmap.json",
+  "mixins": [],
+  "server": [
+    "ChemicalNetworkMixin",
+    "DynamicNetworkMixin",
+    "EnergyNetworkMixin",
+    "FluidNetworkMixin",
+    "LogisticalTransporterBaseMixin",
+    "MechanicalPipeMixin",
+    "PressurizedTubeMixin",
+    "TransporterStackMixin",
+    "UniversalCableMixin"
+  ],
+  "client": [
+    "TransmitterBakedModelMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

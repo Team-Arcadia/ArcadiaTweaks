@@ -3,6 +3,7 @@ package com.teamarcadia.arcadiatweaks.common.modules.botany;
 import com.teamarcadia.arcadiatweaks.ArcadiaTweaks;
 import com.teamarcadia.arcadiatweaks.common.config.ArcadiaConfig;
 import com.teamarcadia.arcadiatweaks.common.module.ArcadiaModule;
+import com.teamarcadia.arcadiatweaks.common.module.ArcadiaPatchVariant;
 
 public final class BotanyModule implements ArcadiaModule {
 
@@ -13,7 +14,7 @@ public final class BotanyModule implements ArcadiaModule {
 
     @Override
     public boolean enabledByConfig() {
-        return ArcadiaConfig.MODULE_BOTANY_ENABLED.get();
+        return ArcadiaPatchVariant.hasBotany() && ArcadiaConfig.MODULE_BOTANY_ENABLED.get();
     }
 
     @Override

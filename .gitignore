@@ -32,3 +32,6 @@ local.properties
 # Local third-party jars (developer-supplied, not redistributed).
 # See README "Dev runtime mods" for how to populate.
 libs/*.jar
+
+# Local upstream source checkouts used for audits.
+reference/

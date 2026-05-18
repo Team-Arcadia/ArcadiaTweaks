@@ -5,6 +5,8 @@ import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.teamarcadia.arcadiatweaks.common.config.ArcadiaConfig;
 import com.teamarcadia.arcadiatweaks.neoforge.botany.ArcadiaPotState;
+import com.teamarcadia.arcadiatweaks.neoforge.botany.BotanyMixinCompatibility;
+import com.teamarcadia.arcadiatweaks.neoforge.support.ArcadiaTickCoalescing;
 import net.darkhax.bookshelf.common.api.function.ReloadableCache;
 import net.darkhax.bookshelf.common.api.util.IGameplayHelper;
 import net.darkhax.bookshelf.common.api.util.TickAccumulator;
@@ -150,9 +152,9 @@ public abstract class BotanyPotBlockEntityMixin implements ArcadiaPotState {
         if (n <= 1) return;
 
         final ArcadiaPotState state = (ArcadiaPotState) pot;
-        final int next = (state.arcadia$getCoalescePhase() + 1) % n;
-        state.arcadia$setCoalescePhase(next);
-        if (next != 0) {
+        final ArcadiaTickCoalescing.Decision decision = ArcadiaTickCoalescing.advance(state.arcadia$getCoalescePhase(), n);
+        state.arcadia$setCoalescePhase(decision.nextPhase());
+        if (!decision.shouldRun()) {
             ci.cancel();
         }
     }
@@ -196,6 +198,7 @@ public abstract class BotanyPotBlockEntityMixin implements ArcadiaPotState {
 
     @Unique
     private static int arcadia$activeCoalesceN() {
+        if (!BotanyMixinCompatibility.isTickPotCoalescingCompatible()) return 1;
         if (!ArcadiaConfig.BOTANY.s2TickCoalescing.get()) return 1;
         final int n = ArcadiaConfig.BOTANY.s2CoalesceN.get();
         return Math.max(1, n);

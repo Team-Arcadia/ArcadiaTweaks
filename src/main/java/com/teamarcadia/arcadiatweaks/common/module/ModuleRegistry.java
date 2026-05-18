@@ -2,6 +2,8 @@ package com.teamarcadia.arcadiatweaks.common.module;
 
 import com.teamarcadia.arcadiatweaks.ArcadiaTweaks;
 import com.teamarcadia.arcadiatweaks.common.modules.botany.BotanyModule;
+import com.teamarcadia.arcadiatweaks.common.modules.mekanism.MekanismModule;
+import com.teamarcadia.arcadiatweaks.common.modules.refinedstorage.RefinedStorageModule;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -20,6 +22,8 @@ public final class ModuleRegistry {
         bootstrapped = true;
 
         ALL.add(new BotanyModule());
+        ALL.add(new RefinedStorageModule());
+        ALL.add(new MekanismModule());
 
         for (ArcadiaModule m : ALL) {
             if (m.enabledByConfig()) {

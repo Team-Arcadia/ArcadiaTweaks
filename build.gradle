@@ -26,6 +26,18 @@ repositories {
     }
 }
 
+configurations {
+    testCompileOnly.extendsFrom compileOnly
+    testRuntimeOnly.extendsFrom runtimeOnly
+}
+
+sourceSets {
+    test {
+        compileClasspath += sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.runtimeClasspath
+    }
+}
+
 dependencies {
     // Local jars in libs/ - copied from the production Arcadia modpack instance.
     // BotanyPots is declared as an OPTIONAL dep in mods.toml (umbrella stance);
@@ -36,10 +48,17 @@ dependencies {
     // mod jar (moddev publishes a thin jar; these go through compileOnly/runtimeOnly).
     compileOnly  files("libs/botanypots-neoforge-1.21.1-${botanypots_version}.jar")
     compileOnly  files("libs/bookshelf-neoforge-1.21.1-${bookshelf_version}.jar")
+    compileOnly  files("libs/refinedstorage-neoforge-${refinedstorage_version}.jar")
+    compileOnly  files("libs/Mekanism-1.21.1-${mekanism_version}.jar")
 
     runtimeOnly  files("libs/botanypots-neoforge-1.21.1-${botanypots_version}.jar")
     runtimeOnly  files("libs/bookshelf-neoforge-1.21.1-${bookshelf_version}.jar")
     runtimeOnly  files("libs/prickle-neoforge-1.21.1-${prickle_version}.jar")
+    runtimeOnly  files("libs/refinedstorage-neoforge-${refinedstorage_version}.jar")
+    runtimeOnly  files("libs/Mekanism-1.21.1-${mekanism_version}.jar")
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.3'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
 neoForge {
@@ -62,6 +81,12 @@ neoForge {
         }
         server {
             server()
+        }
+        gameTestServer {
+            server()
+            systemProperty 'neoforge.gameTestServer', 'true'
+            systemProperty 'neoforge.enabledGameTestNamespaces', mod_id
+            programArgument '--nogui'
         }
         data {
             data()
@@ -96,7 +121,235 @@ processResources {
     }
 }
 
+def baseMixinConfig = "${mod_id}.mixins.json"
+def patchMixinConfigs = [
+    botany        : "${mod_id}.botany.mixins.json",
+    refinedstorage: "${mod_id}.refinedstorage.mixins.json",
+    mekanism      : "${mod_id}.mekanism.mixins.json"
+]
+
+def patchJarVariants = [
+    all           : [
+        taskName      : 'jarAllPatches',
+        classifier    : 'all',
+        displayName   : 'all patches',
+        mixinConfigs  : [baseMixinConfig, patchMixinConfigs.botany, patchMixinConfigs.refinedstorage, patchMixinConfigs.mekanism],
+        optionalDeps  : ['botanypots', 'refinedstorage', 'mekanism'],
+        excludedClasses: []
+    ],
+    botany        : [
+        taskName      : 'jarBotanyPatch',
+        classifier    : 'botany',
+        displayName   : 'BotanyPots patch only',
+        mixinConfigs  : [baseMixinConfig, patchMixinConfigs.botany],
+        optionalDeps  : ['botanypots'],
+        excludedClasses: [
+            'com/teamarcadia/arcadiatweaks/neoforge/mixin/refinedstorage/**',
+            'com/teamarcadia/arcadiatweaks/neoforge/refinedstorage/**',
+            'com/teamarcadia/arcadiatweaks/neoforge/mixin/mekanism/**',
+            'com/teamarcadia/arcadiatweaks/neoforge/mekanism/**'
+        ]
+    ],
+    refinedstorage: [
+        taskName      : 'jarRefinedStoragePatch',
+        classifier    : 'refinedstorage',
+        displayName   : 'Refined Storage patch only',
+        mixinConfigs  : [baseMixinConfig, patchMixinConfigs.refinedstorage],
+        optionalDeps  : ['refinedstorage'],
+        excludedClasses: [
+            'com/teamarcadia/arcadiatweaks/neoforge/mixin/botany/**',
+            'com/teamarcadia/arcadiatweaks/neoforge/botany/**',
+            'com/teamarcadia/arcadiatweaks/neoforge/mixin/mekanism/**',
+            'com/teamarcadia/arcadiatweaks/neoforge/mekanism/**'
+        ]
+    ],
+    mekanism      : [
+        taskName      : 'jarMekanismPatch',
+        classifier    : 'mekanism',
+        displayName   : 'Mekanism patch only',
+        mixinConfigs  : [baseMixinConfig, patchMixinConfigs.mekanism],
+        optionalDeps  : ['mekanism'],
+        excludedClasses: [
+            'com/teamarcadia/arcadiatweaks/neoforge/mixin/botany/**',
+            'com/teamarcadia/arcadiatweaks/neoforge/botany/**',
+            'com/teamarcadia/arcadiatweaks/neoforge/mixin/refinedstorage/**',
+            'com/teamarcadia/arcadiatweaks/neoforge/refinedstorage/**'
+        ]
+    ]
+]
+
+def renderVariantModsToml = { variant ->
+    def mixinBlocks = variant.mixinConfigs.collect { cfg ->
+        """
+[[mixins]]
+config = "${cfg}"
+"""
+    }.join('')
+
+    def optionalDependencyBlocks = ''
+    if (variant.optionalDeps.contains('botanypots')) {
+        optionalDependencyBlocks += """
+
+# BotanyPots is optional at load time - the Mixin module is only effective when
+# BotanyPots is present, but ArcadiaTweaks must NOT hard-require it (umbrella mod).
+[[dependencies.${mod_id}]]
+modId = "botanypots"
+type = "optional"
+versionRange = "[0.0.0,)"
+ordering = "AFTER"
+side = "BOTH"
+"""
+    }
+    if (variant.optionalDeps.contains('refinedstorage')) {
+        optionalDependencyBlocks += """
+
+# Refined Storage is optional at load time. The module only applies when RS2 is present.
+[[dependencies.${mod_id}]]
+modId = "refinedstorage"
+type = "optional"
+versionRange = "[0.0.0,)"
+ordering = "AFTER"
+side = "BOTH"
+"""
+    }
+    if (variant.optionalDeps.contains('mekanism')) {
+        optionalDependencyBlocks += """
+
+# Mekanism is optional at load time. The module only applies when Mekanism is present.
+[[dependencies.${mod_id}]]
+modId = "mekanism"
+type = "optional"
+versionRange = "[0.0.0,)"
+ordering = "AFTER"
+side = "BOTH"
+"""
+    }
+
+    return """modLoader = "javafml"
+loaderVersion = "[4,)"
+license = "${mod_license}"
+issueTrackerURL = "https://github.com/Team-Arcadia/ArcadiaTweaks/issues"
+
+[[mods]]
+modId = "${mod_id}"
+version = "${mod_version}"
+displayName = "${mod_name}"
+authors = "${mod_authors}"
+credits = "${mod_credits}"
+description = '''${mod_description}'''
+logoFile = "icon.png"
+${mixinBlocks}
+[[dependencies.${mod_id}]]
+modId = "neoforge"
+type = "required"
+versionRange = "[${neoforge_version},)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.${mod_id}]]
+modId = "minecraft"
+type = "required"
+versionRange = "[${minecraft_version}]"
+ordering = "NONE"
+side = "BOTH"${optionalDependencyBlocks}
+"""
+}
+
+patchJarVariants.each { variantName, variant ->
+    def capitalizedName = variantName.capitalize()
+    def generatedModsToml = layout.buildDirectory.file("generated/patchJarResources/${variantName}/META-INF/neoforge.mods.toml")
+    def generateTask = tasks.register("generate${capitalizedName}PatchModsToml") {
+        inputs.property('variantName', variantName)
+        inputs.property('mixinConfigs', variant.mixinConfigs.join(','))
+        inputs.property('optionalDeps', variant.optionalDeps.join(','))
+        outputs.file(generatedModsToml)
+        doLast {
+            def outputFile = generatedModsToml.get().asFile
+            outputFile.parentFile.mkdirs()
+            outputFile.text = renderVariantModsToml(variant)
+        }
+    }
+
+    tasks.register(variant.taskName, Jar) {
+        group = 'build'
+        description = "Builds ArcadiaTweaks jar with ${variant.displayName}."
+        dependsOn tasks.named('classes'), generateTask
+        archiveBaseName = mod_id
+        archiveVersion = mod_version
+        archiveClassifier = variant.classifier
+
+        from(sourceSets.main.output) {
+            exclude 'META-INF/neoforge.mods.toml'
+            exclude 'com/teamarcadia/arcadiatweaks/neoforge/gametest/**'
+            patchMixinConfigs.values().each { cfg ->
+                if (!variant.mixinConfigs.contains(cfg)) {
+                    exclude cfg
+                }
+            }
+            variant.excludedClasses.each { pattern ->
+                exclude pattern
+            }
+        }
+        from(generatedModsToml.map { it.asFile.parentFile.parentFile }) {
+            include 'META-INF/neoforge.mods.toml'
+        }
+
+        manifest {
+            attributes([
+                'Specification-Title'     : mod_name,
+                'Specification-Vendor'    : mod_authors,
+                'Specification-Version'   : '1',
+                'Implementation-Title'    : mod_name,
+                'Implementation-Version'  : mod_version,
+                'Implementation-Vendor'   : mod_authors,
+                'MixinConfigs'            : variant.mixinConfigs.join(',')
+            ])
+        }
+    }
+}
+
+tasks.register('jarSelectedPatch') {
+    group = 'build'
+    description = 'Builds one patch jar selected with -ParcadiaPatch=all|botany|refinedstorage|mekanism.'
+    def selectedPatch = (findProperty('arcadiaPatch') ?: 'all').toString().toLowerCase()
+    if (!patchJarVariants.containsKey(selectedPatch)) {
+        throw new GradleException("Unknown arcadiaPatch '${selectedPatch}'. Expected one of: ${patchJarVariants.keySet().join(', ')}")
+    }
+    dependsOn tasks.named(patchJarVariants[selectedPatch].taskName)
+}
+
+tasks.register('jarPatchVariants') {
+    group = 'build'
+    description = 'Builds all ArcadiaTweaks patch jar variants.'
+    dependsOn patchJarVariants.values().collect { tasks.named(it.taskName) }
+}
+
+tasks.register('syncGameTestStructures', Copy) {
+    group = 'verification'
+    description = 'Copies SNBT GameTest structures into the Minecraft run directory.'
+    from layout.projectDirectory.dir('gameteststructures')
+    into layout.projectDirectory.dir('run/gameteststructures')
+}
+
+tasks.named('prepareGameTestServerRun') {
+    dependsOn tasks.named('syncGameTestStructures')
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    dependsOn tasks.named('jarPatchVariants')
+    systemProperty 'arcadia.patchJarDir', layout.buildDirectory.dir('libs').get().asFile.absolutePath
+    systemProperty 'arcadia.modId', mod_id
+    systemProperty 'arcadia.modVersion', mod_version
+}
+
+tasks.named('sourcesJar') {
+    exclude 'com/teamarcadia/arcadiatweaks/neoforge/gametest/**'
+}
+
 jar {
+    exclude 'com/teamarcadia/arcadiatweaks/neoforge/gametest/**'
+
     manifest {
         attributes([
             'Specification-Title'     : mod_name,
@@ -105,7 +358,7 @@ jar {
             'Implementation-Title'    : mod_name,
             'Implementation-Version'  : mod_version,
             'Implementation-Vendor'   : mod_authors,
-            'MixinConfigs'            : "${mod_id}.mixins.json,${mod_id}.botany.mixins.json"
+            'MixinConfigs'            : "${mod_id}.mixins.json,${mod_id}.botany.mixins.json,${mod_id}.refinedstorage.mixins.json,${mod_id}.mekanism.mixins.json"
         ])
     }
 }

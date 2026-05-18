@@ -18,6 +18,12 @@ config = "${mod_id}.mixins.json"
 [[mixins]]
 config = "${mod_id}.botany.mixins.json"
 
+[[mixins]]
+config = "${mod_id}.refinedstorage.mixins.json"
+
+[[mixins]]
+config = "${mod_id}.mekanism.mixins.json"
+
 [[dependencies.${mod_id}]]
 modId = "neoforge"
 type = "required"
@@ -36,6 +42,22 @@ side = "BOTH"
 # BotanyPots is present, but ArcadiaTweaks must NOT hard-require it (umbrella mod).
 [[dependencies.${mod_id}]]
 modId = "botanypots"
+type = "optional"
+versionRange = "[0.0.0,)"
+ordering = "AFTER"
+side = "BOTH"
+
+# Refined Storage is optional at load time. The module only applies when RS2 is present.
+[[dependencies.${mod_id}]]
+modId = "refinedstorage"
+type = "optional"
+versionRange = "[0.0.0,)"
+ordering = "AFTER"
+side = "BOTH"
+
+# Mekanism is optional at load time. The module only applies when Mekanism is present.
+[[dependencies.${mod_id}]]
+modId = "mekanism"
 type = "optional"
 versionRange = "[0.0.0,)"
 ordering = "AFTER"
